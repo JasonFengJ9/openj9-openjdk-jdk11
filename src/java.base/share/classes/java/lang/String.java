@@ -23,9 +23,16 @@
  * questions.
  */
 
+/*
+ * ===========================================================================
+ * (c) Copyright IBM Corp. 2021, 2021 All Rights Reserved
+ * ===========================================================================
+ */
+
 package java.lang;
 
 import java.io.ObjectStreamField;
+import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
 import java.lang.annotation.Native;
 import java.nio.charset.Charset;
@@ -44,6 +51,7 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 import jdk.internal.HotSpotIntrinsicCandidate;
+import jdk.internal.misc.Unsafe;
 import jdk.internal.vm.annotation.Stable;
 
 /**
@@ -195,11 +203,393 @@ public final class String
      * that this static final field is not statically foldable, and to
      * avoid any possible circular dependency during vm initialization.
      */
-    static final boolean COMPACT_STRINGS;
+    /* OpenJ9 String specific */
+    /**
+     * Determines whether String compression is enabled.
+     */
+    static final boolean COMPACT_STRINGS = com.ibm.oti.vm.VM.J9_STRING_COMPRESSION_ENABLED;
+    static final boolean enableCompression = com.ibm.oti.vm.VM.J9_STRING_COMPRESSION_ENABLED;
 
-    static {
-        COMPACT_STRINGS = true;
-    }
+	// Used to access compression related helper methods
+	private static final com.ibm.jit.JITHelpers helpers = com.ibm.jit.JITHelpers.getHelpers();
+
+	static class StringCompressionFlag implements Serializable {
+		private static final long serialVersionUID = 1346155847239551492L;
+	}
+
+	// Singleton used by all String instances to indicate a non-compressed string has been
+	// allocated. JIT attempts to fold away the null check involving this static if the
+	// StringCompressionFlag class has not been initialized and patches the code to bring back
+	// the null check if a non-compressed String is constructed.
+	private static StringCompressionFlag compressionFlag;
+
+	static void initCompressionFlag() {
+		if (compressionFlag == null) {
+			compressionFlag = new StringCompressionFlag();
+		}
+	}
+
+	static void compress(byte[] array1, int start1, byte[] array2, int start2, int length) {
+		for (int i = 0; i < length; ++i) {
+			helpers.putByteInArrayByIndex(array2, start2 + i, (byte) helpers.getCharFromArrayByIndex(array1, start1 + i));
+		}
+	}
+
+	static void compress(char[] array1, int start1, byte[] array2, int start2, int length) {
+		for (int i = 0; i < length; ++i) {
+			helpers.putByteInArrayByIndex(array2, start2 + i, (byte) helpers.getCharFromArrayByIndex(array1, start1 + i));
+		}
+	}
+
+	static void compress(byte[] array1, int start1, char[] array2, int start2, int length) {
+		for (int i = 0; i < length; ++i) {
+			helpers.putByteInArrayByIndex(array2, start2 + i, (byte) helpers.getCharFromArrayByIndex(array1, start1 + i));
+		}
+	}
+
+	static void compress(char[] array1, int start1, char[] array2, int start2, int length) {
+		for (int i = 0; i < length; ++i) {
+			helpers.putByteInArrayByIndex(array2, start2 + i, (byte) helpers.getCharFromArrayByIndex(array1, start1 + i));
+		}
+	}
+
+	static void decompress(byte[] array1, int start1, byte[] array2, int start2, int length) {
+		for (int i = 0; i < length; ++i) {
+			helpers.putCharInArrayByIndex(array2, start2 + i, helpers.byteToCharUnsigned(helpers.getByteFromArrayByIndex(array1, start1 + i)));
+		}
+	}
+
+	static void decompress(char[] array1, int start1, byte[] array2, int start2, int length) {
+		for (int i = 0; i < length; ++i) {
+			helpers.putCharInArrayByIndex(array2, start2 + i, helpers.byteToCharUnsigned(helpers.getByteFromArrayByIndex(array1, start1 + i)));
+		}
+	}
+
+	static void decompress(byte[] array1, int start1, char[] array2, int start2, int length) {
+		for (int i = 0; i < length; ++i) {
+			helpers.putCharInArrayByIndex(array2, start2 + i, helpers.byteToCharUnsigned(helpers.getByteFromArrayByIndex(array1, start1 + i)));
+		}
+	}
+
+	static void decompress(char[] array1, int start1, char[] array2, int start2, int length) {
+		for (int i = 0; i < length; ++i) {
+			helpers.putCharInArrayByIndex(array2, start2 + i, helpers.byteToCharUnsigned(helpers.getByteFromArrayByIndex(array1, start1 + i)));
+		}
+	}
+
+	static void compressedArrayCopy(byte[] array1, int start1, byte[] array2, int start2, int length) {
+		if (array1 == array2 && start1 < start2) {
+			for (int i = length - 1; i >= 0; --i) {
+				helpers.putByteInArrayByIndex(array2, start2 + i, helpers.getByteFromArrayByIndex(array1, start1 + i));
+			}
+		} else {
+			for (int i = 0; i < length; ++i) {
+				helpers.putByteInArrayByIndex(array2, start2 + i, helpers.getByteFromArrayByIndex(array1, start1 + i));
+			}
+		}
+	}
+
+	static void compressedArrayCopy(byte[] array1, int start1, char[] array2, int start2, int length) {
+		for (int i = 0; i < length; ++i) {
+			helpers.putByteInArrayByIndex(array2, start2 + i, helpers.getByteFromArrayByIndex(array1, start1 + i));
+		}
+	}
+
+	static void compressedArrayCopy(char[] array1, int start1, byte[] array2, int start2, int length) {
+		for (int i = 0; i < length; ++i) {
+			helpers.putByteInArrayByIndex(array2, start2 + i, helpers.getByteFromArrayByIndex(array1, start1 + i));
+		}
+	}
+
+	static void compressedArrayCopy(char[] array1, int start1, char[] array2, int start2, int length) {
+		if (array1 == array2 && start1 < start2) {
+			for (int i = length - 1; i >= 0; --i) {
+				helpers.putByteInArrayByIndex(array2, start2 + i, helpers.getByteFromArrayByIndex(array1, start1 + i));
+			}
+		} else {
+			for (int i = 0; i < length; ++i) {
+				helpers.putByteInArrayByIndex(array2, start2 + i, helpers.getByteFromArrayByIndex(array1, start1 + i));
+			}
+		}
+	}
+
+	static void decompressedArrayCopy(byte[] array1, int start1, byte[] array2, int start2, int length) {
+		if (array1 == array2 && start1 < start2) {
+			for (int i = length - 1; i >= 0; --i) {
+				helpers.putCharInArrayByIndex(array2, start2 + i, helpers.getCharFromArrayByIndex(array1, start1 + i));
+			}
+		} else {
+			for (int i = 0; i < length; ++i) {
+				helpers.putCharInArrayByIndex(array2, start2 + i, helpers.getCharFromArrayByIndex(array1, start1 + i));
+			}
+		}
+	}
+
+	static void decompressedArrayCopy(byte[] array1, int start1, char[] array2, int start2, int length) {
+		for (int i = 0; i < length; ++i) {
+			helpers.putCharInArrayByIndex(array2, start2 + i, helpers.getCharFromArrayByIndex(array1, start1 + i));
+		}
+	}
+
+	static void decompressedArrayCopy(char[] array1, int start1, byte[] array2, int start2, int length) {
+		for (int i = 0; i < length; ++i) {
+			helpers.putCharInArrayByIndex(array2, start2 + i, helpers.getCharFromArrayByIndex(array1, start1 + i));
+		}
+	}
+
+	static void decompressedArrayCopy(char[] array1, int start1, char[] array2, int start2, int length) {
+		System.arraycopy(array1, start1, array2, start2, length);
+	}
+	
+	private String(String s, char c) {
+		if (s == null) {
+			s = "null"; //$NON-NLS-1$
+		}
+
+		int slen = s.lengthInternal();
+
+		int concatlen = slen + 1;
+		if (concatlen < 0) {
+			// K0D01 = Array capacity exceeded
+			throw new OutOfMemoryError(com.ibm.oti.util.Msg.getString("K0D01")); //$NON-NLS-1$
+		}
+
+		// Check if the String is compressed
+		if (COMPACT_STRINGS && (null == compressionFlag || s.coder == LATIN1) && c <= 255) {
+			value = new byte[concatlen];
+			coder = LATIN1;
+
+			compressedArrayCopy(s.value, 0, value, 0, slen);
+
+			helpers.putByteInArrayByIndex(value, slen, (byte) c);
+		} else {
+			value = StringUTF16.newBytesFor(concatlen);
+			coder = UTF16;
+
+			decompressedArrayCopy(s.value, 0, value, 0, slen);
+
+			helpers.putCharInArrayByIndex(value, slen, c);
+
+			if (COMPACT_STRINGS) {
+				initCompressionFlag();
+			}
+		}
+	}
+
+	/*
+	 * Creates a string that is s1 + s2.
+	 */
+	private String(String s1, String s2) {
+		if (s1 == null) {
+			s1 = "null"; //$NON-NLS-1$
+		}
+
+		if (s2 == null) {
+			s2 = "null"; //$NON-NLS-1$
+		}
+
+		int s1len = s1.lengthInternal();
+		int s2len = s2.lengthInternal();
+
+		int concatlen = s1len + s2len;
+		if (concatlen < 0) {
+			// K0D01 = Array capacity exceeded
+			throw new OutOfMemoryError(com.ibm.oti.util.Msg.getString("K0D01")); //$NON-NLS-1$
+		}
+
+		if (COMPACT_STRINGS && (null == compressionFlag || (s1.coder | s2.coder) == LATIN1)) {
+			value = new byte[concatlen];
+			coder = LATIN1;
+
+			compressedArrayCopy(s1.value, 0, value, 0, s1len);
+			compressedArrayCopy(s2.value, 0, value, s1len, s2len);
+		} else {
+			value = StringUTF16.newBytesFor(concatlen);
+			coder = UTF16;
+
+			// Check if the String is compressed
+			if (COMPACT_STRINGS && s1.coder == LATIN1) {
+				decompress(s1.value, 0, value, 0, s1len);
+			} else {
+				decompressedArrayCopy(s1.value, 0, value, 0, s1len);
+			}
+
+			// Check if the String is compressed
+			if (COMPACT_STRINGS && s2.coder == LATIN1) {
+				decompress(s2.value, 0, value, s1len, s2len);
+			} else {
+				decompressedArrayCopy(s2.value, 0, value, s1len, s2len);
+			}
+
+			if (COMPACT_STRINGS) {
+				initCompressionFlag();
+			}
+		}
+	}
+
+	/*
+	 * Creates a string that is s1 + s2 + s3.
+	 */
+	private String(String s1, String s2, String s3) {
+		if (s1 == null) {
+			s1 = "null"; //$NON-NLS-1$
+		}
+
+		if (s2 == null) {
+			s2 = "null"; //$NON-NLS-1$
+		}
+
+		if (s3 == null) {
+			s3 = "null"; //$NON-NLS-1$
+		}
+
+		int s1len = s1.lengthInternal();
+		int s2len = s2.lengthInternal();
+		int s3len = s3.lengthInternal();
+
+		long totalLen = (long) s1len + (long) s2len + (long) s3len;
+		if (totalLen > Integer.MAX_VALUE) {
+			// K0D01 = Array capacity exceeded
+			throw new OutOfMemoryError(com.ibm.oti.util.Msg.getString("K0D01")); //$NON-NLS-1$
+		}
+		int concatlen = (int) totalLen;
+
+		if (COMPACT_STRINGS && (null == compressionFlag || (s1.coder | s2.coder | s3.coder) == LATIN1)) {
+			value = new byte[concatlen];
+			coder = LATIN1;
+
+			compressedArrayCopy(s1.value, 0, value, 0, s1len);
+			compressedArrayCopy(s2.value, 0, value, s1len, s2len);
+			compressedArrayCopy(s3.value, 0, value, s1len + s2len, s3len);
+		} else {
+			value = StringUTF16.newBytesFor(concatlen);
+			coder = UTF16;
+
+			// Check if the String is compressed
+			if (COMPACT_STRINGS && s1.coder == LATIN1) {
+				decompress(s1.value, 0, value, 0, s1len);
+			} else {
+				decompressedArrayCopy(s1.value, 0, value, 0, s1len);
+			}
+
+			// Check if the String is compressed
+			if (COMPACT_STRINGS && s2.coder == LATIN1) {
+				decompress(s2.value, 0, value, s1len, s2len);
+			} else {
+				decompressedArrayCopy(s2.value, 0, value, s1len, s2len);
+			}
+
+			// Check if the String is compressed
+			if (COMPACT_STRINGS && s3.coder == LATIN1) {
+				decompress(s3.value, 0, value, s1len + s2len, s3len);
+			} else {
+				decompressedArrayCopy(s3.value, 0, value, (s1len + s2len), s3len);
+			}
+
+			if (COMPACT_STRINGS) {
+				initCompressionFlag();
+			}
+		}
+	}
+
+	/*
+	 * Creates a string that is s1 + v1.
+	 */
+	private String(String s1, int v1) {
+		if (s1 == null) {
+			s1 = "null"; //$NON-NLS-1$
+		}
+
+		// Char length of all the parameters respectively
+		int s1len = s1.lengthInternal();
+		int v1len = 1;
+
+		int quot;
+		int i = v1;
+		while ((i /= 10) != 0)
+			v1len++;
+		if (v1 >= 0) {
+			quot = -v1;
+		} else {
+			// Leave room for '-'
+			v1len++;
+			quot = v1;
+		}
+
+		// Char length of the final String
+		int len = s1len + v1len;
+		if (len < 0) {
+			// K0D01 = Array capacity exceeded
+			throw new OutOfMemoryError(com.ibm.oti.util.Msg.getString("K0D01")); //$NON-NLS-1$
+		}
+
+		if (COMPACT_STRINGS && (null == compressionFlag || s1.coder == LATIN1)) {
+			value = new byte[len];
+			coder = LATIN1;
+
+			// Copy in v1
+			int index = len - 1;
+
+			do {
+				int res = quot / 10;
+				int rem = quot - (res * 10);
+
+				quot = res;
+
+				// Write the digit into the correct position
+				helpers.putByteInArrayByIndex(value, index--, (byte) ('0' - rem));
+			} while (quot != 0);
+
+			if (v1 < 0) {
+				helpers.putByteInArrayByIndex(value, index, (byte) '-');
+			}
+
+			// Copy in s1 contents
+			compressedArrayCopy(s1.value, 0, value, 0, s1len);
+		} else {
+			value = StringUTF16.newBytesFor(len);
+			coder = UTF16;
+
+			// Copy in v1
+			int index = len - 1;
+
+			do {
+				int res = quot / 10;
+				int rem = quot - (res * 10);
+
+				quot = res;
+
+				// Write the digit into the correct position
+				helpers.putCharInArrayByIndex(value, index--, (char) ('0' - rem));
+			} while (quot != 0);
+
+			if (v1 < 0) {
+				helpers.putCharInArrayByIndex(value, index, (char) '-');
+			}
+
+			// Copy in s1 contents
+			decompressedArrayCopy(s1.value, 0, value, 0, s1len);
+
+			if (COMPACT_STRINGS) {
+				initCompressionFlag();
+			}
+		}
+	}
+
+	/**
+	 * Answers the size of this String. This method is to be used internally within the current package whenever
+	 * possible as the JIT compiler will take special precaution to avoid generating HCR guards for calls to this
+	 * method.
+	 *
+	 * @return the number of characters in this String
+	 */
+	int lengthInternal() {
+		if (COMPACT_STRINGS) {
+			return value.length >> coder;
+		} else {
+			return value.length >> 1;
+		}
+	}
 
     /**
      * Class String is special cased within the Serialization Stream Protocol.
